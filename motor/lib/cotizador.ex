@@ -74,10 +74,12 @@ defmodule Cotizador do
     flete = flete_bruto - descuento
     cuota_puente = Map.fetch!(reglas.cuota_puente, embarque.puente)
 
-    recargo = 0
+    base_recargo = flete
+    recargo_cfg = Map.fetch!(reglas.recargo, embarque.tipo)
+    recargo = pct(base_recargo, recargo_cfg.pct) + recargo_cfg.fija
+
     subtotal = flete + cuota_puente + recargo
-    total = subtotal
-    ajuste_minimo = 0
+    {ajuste_minimo, total} = calcular_ajuste_minimo(subtotal, reglas.minimo)
 
     %{
       flete_bruto: flete_bruto,
@@ -103,4 +105,24 @@ defmodule Cotizador do
   end
 
   defp calcular_descuento(_peso, _flete_bruto, _descuento_cfg), do: 0
+
+  # Etapa 3 · Recargos y mínimo (meta: miércoles 21)
+
+  # - `Map.fetch!(reglas.recargo, embarque.tipo)` les da `%{pct: _, fija: _}`.
+  # - **La base** del porcentaje depende de `reglas.base_recargo`: `:flete` o `:subtotal` (flete más
+  #   cuota). Igual que el criterio: **dos cláusulas**, no un `if`.
+  # - El total nunca baja de `reglas.minimo`; `ajuste_minimo` es lo que se sumó para llegar (casi
+  #   siempre 0). `max/2` existe.
+
+  # Antes de escribir, hagan a mano la prueba "refrigerada paga su recargo" de su variante (lo hicieron
+  # en el arranque): si su cuenta a mano no da, el código tampoco va a dar.
+  # Ajuste mínimo cuando no alcanza la tarifa mínima
+  defp calcular_ajuste_minimo(subtotal, minimo) when subtotal < minimo do
+    {minimo - subtotal, minimo}
+  end
+
+  # Ajuste mínimo cuando iguala o supera la tarifa mínima
+  defp calcular_ajuste_minimo(subtotal, _minimo) do
+    {0, subtotal}
+  end
 end

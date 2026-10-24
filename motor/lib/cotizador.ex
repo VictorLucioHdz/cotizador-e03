@@ -37,6 +37,70 @@ defmodule Cotizador do
   # 9. Caso base exitoso
   defp validar(_embarque, _reglas), do: :ok
 
-  # Función provisional para calcular
-  defp calcular(_embarque, _reglas), do: %{}
+  # Etapa 2 · El flete (meta: viernes 16)
+
+  # Ahora `calcular/2`. En esta etapa: flete bruto, descuento, flete y cuota del puente. El recargo y el
+  # mínimo todavía en 0 (la prueba "por debajo del umbral" es carga general: su recargo **es** 0).
+
+  # **El redondeo,** que va a usar todo lo que tenga porcentaje. Viene en el enunciado; escríbanlo una vez:
+
+  # ```elixir
+  # # un porcentaje, redondeado al centavo, las mitades hacia arriba
+  # defp pct(monto, p), do: div(monto * p + 50, 100)
+  # ```
+
+  # **El descuento** depende del criterio de su variante, y ahí está la prueba "EXACTAMENTE en el
+  # umbral". Tracen esa prueba a mano antes de escribir: con su criterio, ¿el peso exacto lleva
+  # descuento o no?
+
+  # <details><summary>Pista · el criterio, sin if</summary>
+
+  # Una función con dos cláusulas que reciba el peso y `reglas.descuento`, y decida con el patrón del
+  # criterio (`%{criterio: :a_partir_de, umbral_kg: u}` contra `%{criterio: :mas_de, umbral_kg: u}`) y
+  # una guarda con `>=` o `>`. Las reglas traen las dos llaves; ustedes no escriben ningún número.
+  # </details>
+
+  # <details><summary>Pista · la cuota del puente</summary>
+
+  # `Map.fetch!(reglas.cuota_puente, embarque.puente)`. El `!` es a propósito: si el puente no existiera,
+  # truena. Pero ya no puede pasar, porque `validar` lo rechazó antes.
+  # </details>
+
+  # **Listo cuando:** pasan las 7 de "rechaza" y las 4 de esta etapa (16 pruebas, 5 fallas).
+
+  defp calcular(embarque, reglas) do
+    flete_bruto = embarque.distancia_km * reglas.tarifa_km
+    descuento = calcular_descuento(embarque.peso_kg, flete_bruto, reglas.descuento)
+    flete = flete_bruto - descuento
+    cuota_puente = Map.fetch!(reglas.cuota_puente, embarque.puente)
+
+    recargo = 0
+    subtotal = flete + cuota_puente + recargo
+    total = subtotal
+    ajuste_minimo = 0
+
+    %{
+      flete_bruto: flete_bruto,
+      descuento: descuento,
+      flete: flete,
+      cuota_puente: cuota_puente,
+      recargo: recargo,
+      ajuste_minimo: ajuste_minimo,
+      total: total
+    }
+  end
+
+  defp pct(monto, p), do: div(monto * p + 50, 100)
+
+  defp calcular_descuento(peso, flete_bruto, %{criterio: :a_partir_de, umbral_kg: u, pct: p})
+       when peso >= u do
+    pct(flete_bruto, p)
+  end
+
+  defp calcular_descuento(peso, flete_bruto, %{criterio: :mas_de, umbral_kg: u, pct: p})
+       when peso > u do
+    pct(flete_bruto, p)
+  end
+
+  defp calcular_descuento(_peso, _flete_bruto, _descuento_cfg), do: 0
 end

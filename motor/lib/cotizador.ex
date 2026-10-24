@@ -7,6 +7,21 @@ defmodule Cotizador do
     end
   end
 
+  def resumen(lote, reglas) do
+    acumulador_inicial = %{
+      cotizados: 0,
+      rechazados: [],
+      total: 0,
+      por_puente: %{}
+    }
+
+    lote
+    |> Enum.reduce(acumulador_inicial, fn embarque, acc ->
+      acumular(cotizar(embarque, reglas), acc, embarque)
+    end)
+    |> Map.update!(:rechazados, &Enum.reverse/1)
+  end
+
   # 1. Rechaza peso menor o igual a cero
   defp validar(%{peso_kg: p}, _reglas) when p <= 0, do: {:error, :peso_invalido}
 
@@ -37,37 +52,6 @@ defmodule Cotizador do
   # 9. Caso base exitoso
   defp validar(_embarque, _reglas), do: :ok
 
-  # Etapa 2 · El flete (meta: viernes 16)
-
-  # Ahora `calcular/2`. En esta etapa: flete bruto, descuento, flete y cuota del puente. El recargo y el
-  # mínimo todavía en 0 (la prueba "por debajo del umbral" es carga general: su recargo **es** 0).
-
-  # **El redondeo,** que va a usar todo lo que tenga porcentaje. Viene en el enunciado; escríbanlo una vez:
-
-  # ```elixir
-  # # un porcentaje, redondeado al centavo, las mitades hacia arriba
-  # defp pct(monto, p), do: div(monto * p + 50, 100)
-  # ```
-
-  # **El descuento** depende del criterio de su variante, y ahí está la prueba "EXACTAMENTE en el
-  # umbral". Tracen esa prueba a mano antes de escribir: con su criterio, ¿el peso exacto lleva
-  # descuento o no?
-
-  # <details><summary>Pista · el criterio, sin if</summary>
-
-  # Una función con dos cláusulas que reciba el peso y `reglas.descuento`, y decida con el patrón del
-  # criterio (`%{criterio: :a_partir_de, umbral_kg: u}` contra `%{criterio: :mas_de, umbral_kg: u}`) y
-  # una guarda con `>=` o `>`. Las reglas traen las dos llaves; ustedes no escriben ningún número.
-  # </details>
-
-  # <details><summary>Pista · la cuota del puente</summary>
-
-  # `Map.fetch!(reglas.cuota_puente, embarque.puente)`. El `!` es a propósito: si el puente no existiera,
-  # truena. Pero ya no puede pasar, porque `validar` lo rechazó antes.
-  # </details>
-
-  # **Listo cuando:** pasan las 7 de "rechaza" y las 4 de esta etapa (16 pruebas, 5 fallas).
-
   defp calcular(embarque, reglas) do
     flete_bruto = embarque.distancia_km * reglas.tarifa_km
     descuento = calcular_descuento(embarque.peso_kg, flete_bruto, reglas.descuento)
@@ -92,8 +76,29 @@ defmodule Cotizador do
     }
   end
 
+  defp acumular({:ok, cotizacion}, acc, embarque) do
+    nuevo_desglose =
+      Map.update(acc.por_puente, embarque.puente, cotizacion.total, &(&1 + cotizacion.total))
+
+    %{
+      acc
+      | cotizados: acc.cotizados + 1,
+        total: acc.total + cotizacion.total,
+        por_puente: nuevo_desglose
+    }
+  end
+
+  defp acumular({:error, motivo}, acc, embarque) do
+    %{
+      acc
+      | rechazados: [{embarque.id, motivo} | acc.rechazados]
+    }
+  end
+
+  # Redondeo bancario
   defp pct(monto, p), do: div(monto * p + 50, 100)
 
+  # Descuento por volumen
   defp calcular_descuento(peso, flete_bruto, %{criterio: :a_partir_de, umbral_kg: u, pct: p})
        when peso >= u do
     pct(flete_bruto, p)
@@ -106,22 +111,11 @@ defmodule Cotizador do
 
   defp calcular_descuento(_peso, _flete_bruto, _descuento_cfg), do: 0
 
-  # Etapa 3 · Recargos y mínimo (meta: miércoles 21)
-
-  # - `Map.fetch!(reglas.recargo, embarque.tipo)` les da `%{pct: _, fija: _}`.
-  # - **La base** del porcentaje depende de `reglas.base_recargo`: `:flete` o `:subtotal` (flete más
-  #   cuota). Igual que el criterio: **dos cláusulas**, no un `if`.
-  # - El total nunca baja de `reglas.minimo`; `ajuste_minimo` es lo que se sumó para llegar (casi
-  #   siempre 0). `max/2` existe.
-
-  # Antes de escribir, hagan a mano la prueba "refrigerada paga su recargo" de su variante (lo hicieron
-  # en el arranque): si su cuenta a mano no da, el código tampoco va a dar.
-  # Ajuste mínimo cuando no alcanza la tarifa mínima
+  # Ajuste mínimo
   defp calcular_ajuste_minimo(subtotal, minimo) when subtotal < minimo do
     {minimo - subtotal, minimo}
   end
 
-  # Ajuste mínimo cuando iguala o supera la tarifa mínima
   defp calcular_ajuste_minimo(subtotal, _minimo) do
     {0, subtotal}
   end
